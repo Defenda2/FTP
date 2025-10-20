@@ -1,60 +1,66 @@
 ---
-- name: Deploy and Configure FTP Server
-  hosts: ftp_server
-  become: true
-
+- name: Deploy FTP server with templated config
+  hosts: ftp
+  become: yes
   vars:
-    # Users defined in competition.yaml
-    ftp_users:
-      - username: "ttesterson"
-        password: "testpass"
-      - username: "rpeterson"
-        password: "otherpass"
-    
-    # Scored file details from competition.yaml
-    scored_file_path: "ftp_files"
-    scored_file_name: "testfile.txt"
-    scored_file_content: "Sample file contents"
+    ftp_allow_anonymous: false
+    ftp_user: ftpuser
+    ftp_password: "SuperSecurePassword123!"
+    ftp_home: "/home/{{ ftp_user }}"
+    ftp_config_path: "/etc/vsftpd.conf"
 
   tasks:
-    - name: Install vsftpd package
-      ansible.builtin.apt:
+
+    - name: Install vsftpd
+      apt:
         name: vsftpd
         state: present
         update_cache: yes
 
-    - name: Push vsftpd configuration file
-      ansible.builtin.template:
-        src: templates/vsftpd.conf.j2
-        dest: /etc/vsftpd.conf
+    - name: Create FTP user (if anonymous disabled)
+      user:
+        name: "{{ ftp_user }}"
+        password: "{{ ftp_password | password_hash('sha512') }}"
+        shell: /usr/sbin/nologin
+        home: "{{ ftp_home }}"
+        state: present
+      when: not ftp_allow_anonymous
+
+    - name: Create FTP home directory
+      file:
+        path: "{{ ftp_home }}"
+        state: directory
+        owner: "{{ ftp_user }}"
+        group: "{{ ftp_user }}"
+        mode: '0755'
+      when: not ftp_allow_anonymous
+
+    - name: Backup default vsftpd.conf
+      copy:
+        src: "{{ ftp_config_path }}"
+        dest: "{{ ftp_config_path }}.bak"
+        remote_src: yes
+
+    - name: Deploy vsftpd config from template
+      template:
+        src: "vsftpd.conf.j2"
+        dest: "{{ ftp_config_path }}"
         owner: root
         group: root
         mode: '0644'
-      notify: Restart vsftpd
 
-    - name: Create FTP users
-      ansible.builtin.user:
-        name: "{{ item.username }}"
-        password: "{{ item.password | password_hash('sha512') }}"
-        shell: /bin/bash
-        state: present
-      loop: "{{ ftp_users }}"
-
-    - name: Create scored directory and file for each user
-      ansible.builtin.include_tasks:
-        file: tasks/create_user_files.yml
-      loop: "{{ ftp_users }}"
-      loop_control:
-        loop_var: current_user
-
-    - name: Ensure vsftpd service is started and enabled
-      ansible.builtin.service:
-        name: vsftpd
-        state: started
-        enabled: yes
-
-  handlers:
     - name: Restart vsftpd
-      ansible.builtin.service:
+      service:
         name: vsftpd
         state: restarted
+        enabled: yes
+
+    - name: Verify FTP port is listening
+      shell: "ss -tulpn | grep :21"
+      register: ftp_port_check
+      changed_when: false
+
+    - name: Show FTP port status
+      debug:
+        msg: "{{ ftp_port_check.stdout }}"
+
