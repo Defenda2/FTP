@@ -1,13 +1,11 @@
 ---
-- name: Deploy FTP server with templated config
+- name: Deploy FTP server using existing users
   hosts: ftp
   become: yes
   vars:
     ftp_allow_anonymous: false
-    ftp_user: ftpuser
-    ftp_password: "SuperSecurePassword123!"
-    ftp_home: "/home/{{ ftp_user }}"
-    ftp_config_path: "/etc/vsftpd.conf"
+    ftp_files_dir: /srv/ftp_files
+    ftp_config_path: /etc/vsftpd.conf
 
   tasks:
 
@@ -16,24 +14,6 @@
         name: vsftpd
         state: present
         update_cache: yes
-
-    - name: Create FTP user (if anonymous disabled)
-      user:
-        name: "{{ ftp_user }}"
-        password: "{{ ftp_password | password_hash('sha512') }}"
-        shell: /usr/sbin/nologin
-        home: "{{ ftp_home }}"
-        state: present
-      when: not ftp_allow_anonymous
-
-    - name: Create FTP home directory
-      file:
-        path: "{{ ftp_home }}"
-        state: directory
-        owner: "{{ ftp_user }}"
-        group: "{{ ftp_user }}"
-        mode: '0755'
-      when: not ftp_allow_anonymous
 
     - name: Backup default vsftpd.conf
       copy:
@@ -45,6 +25,22 @@
       template:
         src: "vsftpd.conf.j2"
         dest: "{{ ftp_config_path }}"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Create FTP files directory
+      file:
+        path: "{{ ftp_files_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Create test file in FTP directory
+      copy:
+        dest: "{{ ftp_files_dir }}/testfile.txt"
+        content: "This is a test file for FTP validation.\n"
         owner: root
         group: root
         mode: '0644'
